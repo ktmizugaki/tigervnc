@@ -40,7 +40,7 @@ class Viewport : public Fl_Widget, protected EmulateMB,
                  protected KeyboardHandler {
 public:
 
-  Viewport(int w, int h, CConn* cc_);
+  Viewport(int w, int h, double scale, CConn* cc_);
   ~Viewport();
 
   // Most efficient format (from Viewport's point of view)
@@ -55,6 +55,8 @@ public:
   // Change client LED state
   void setLEDState(unsigned int state);
 
+  void resizeFramebuffer(int scaledW, int scaledH, double newScale);
+
   void draw(Surface* dst);
 
   // Clipboard events
@@ -65,8 +67,6 @@ public:
   // Fl_Widget callback methods
 
   void draw() override;
-
-  void resize(int x, int y, int w, int h) override;
 
   int handle(int event) override;
 
@@ -109,6 +109,7 @@ private:
   CConn* cc;
 
   PlatformPixelBuffer* frameBuffer;
+  double currentScale;
 
   core::Point lastPointerPos;
   uint16_t lastButtonMask;

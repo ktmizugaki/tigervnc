@@ -96,12 +96,20 @@ DesktopWindow::DesktopWindow(int w, int h, CConn* cc_)
 {
   Fl_Group* group;
 
+  currentScale = isAutoFit() ? 1.0 : ::scalingFactor / 100.0;
+
   // Dummy group to prevent FLTK from moving our widgets around
   group = new Fl_Group(0, 0, w, h);
   group->resizable(nullptr);
   resizable(group);
 
-  viewport = new Viewport(w, h, cc);
+  /* apply initial scaling factor */
+  // scale after creating group because if group size differ from window
+  // size, weird things happened.
+  w = w*currentScale;
+  h = h*currentScale;
+
+  viewport = new Viewport(w, h, currentScale, cc);
 
   // Position will be adjusted later
   hscroll = new Fl_Scrollbar(0, 0, 0, 0);
@@ -363,6 +371,9 @@ void DesktopWindow::resizeFramebuffer(int new_w, int new_h)
 {
   bool maximized;
 
+  new_w = new_w * currentScale;
+  new_h = new_h * currentScale;
+
   if ((new_w == viewport->w()) && (new_h == viewport->h()))
     return;
 
@@ -404,12 +415,16 @@ void DesktopWindow::resizeFramebuffer(int new_w, int new_h)
   // If we're letting the viewport match the window perfectly, then
   // keep things that way for the new size, otherwise just keep things
   // like they are.
-  if (!fullscreen_active() && !maximized) {
+  if (!fullscreen_active() && !maximized && !isAutoFit()) {
     if ((w() == viewport->w()) && (h() == viewport->h()))
       size(new_w, new_h);
   }
 
-  viewport->size(new_w, new_h);
+  if (isAutoFit()) {
+    autoFit();
+  } else {
+    viewport->resizeFramebuffer(new_w, new_h, currentScale);
+  }
 
   repositionWidgets();
 }
@@ -719,6 +734,7 @@ void DesktopWindow::resize(int x, int y, int w, int h)
 
   if (resizing) {
     remoteResize();
+    autoFit();
 
     repositionWidgets();
   }
@@ -1372,6 +1388,7 @@ void DesktopWindow::reconfigureFullscreen(void* /*data*/)
 void DesktopWindow::remoteResize()
 {
   int width, height;
+  int unscaledWidth, unscaledHeight;
   rfb::ScreenSet layout;
   rfb::ScreenSet::const_iterator iter;
 
@@ -1410,6 +1427,9 @@ void DesktopWindow::remoteResize()
 
     sentDesktopSize = true;
   }
+  // FIXME: remote resizing with scaling is not tested at all.
+  unscaledWidth = width/currentScale;
+  unscaledHeight = height/currentScale;
 
   if (!fullscreen_active() || (width > w()) || (height > h())) {
     // In windowed mode (or the framebuffer is so large that we need
@@ -1440,8 +1460,8 @@ void DesktopWindow::remoteResize()
     // Resize the remaining single screen to the complete framebuffer
     layout.begin()->dimensions.tl.x = 0;
     layout.begin()->dimensions.tl.y = 0;
-    layout.begin()->dimensions.br.x = width;
-    layout.begin()->dimensions.br.y = height;
+    layout.begin()->dimensions.br.x = unscaledWidth;
+    layout.begin()->dimensions.br.y = unscaledHeight;
   } else {
     uint32_t id;
     int sx, sy, sw, sh;
@@ -1474,10 +1494,10 @@ void DesktopWindow::remoteResize()
       // in the screen layout...
       for (iter = cc->server.screenLayout().begin();
            iter != cc->server.screenLayout().end(); ++iter) {
-        if ((iter->dimensions.tl.x == sx) &&
-            (iter->dimensions.tl.y == sy) &&
-            (iter->dimensions.width() == sw) &&
-            (iter->dimensions.height() == sh) &&
+        if ((iter->dimensions.tl.x == sx/currentScale) &&
+            (iter->dimensions.tl.y == sy/currentScale) &&
+            (iter->dimensions.width() == sw/currentScale) &&
+            (iter->dimensions.height() == sh/currentScale) &&
             (std::find(layout.begin(), layout.end(), *iter) == layout.end()))
           break;
       }
@@ -1501,27 +1521,27 @@ void DesktopWindow::remoteResize()
           break;
       }
 
-      layout.add_screen(rfb::Screen(id, sx, sy, sw, sh, 0));
+      layout.add_screen(rfb::Screen(id, sx/currentScale, sy/currentScale, sw/currentScale, sh/currentScale, 0));
     }
 
     // If the viewport doesn't match a physical screen, then we might
     // end up with no screens in the layout. Add a fake one...
     if (layout.num_screens() == 0)
-      layout.add_screen(rfb::Screen(0, 0, 0, width, height, 0));
+      layout.add_screen(rfb::Screen(0, 0, 0, unscaledWidth, unscaledHeight, 0));
   }
 
   // Do we actually change anything?
-  if ((width == cc->server.width()) &&
-      (height == cc->server.height()) &&
+  if ((unscaledWidth == cc->server.width()) &&
+      (unscaledHeight == cc->server.height()) &&
       (layout == cc->server.screenLayout()))
     return;
 
   vlog.debug("Requesting framebuffer resize from %dx%d to %dx%d",
-             cc->server.width(), cc->server.height(), width, height);
+             cc->server.width(), cc->server.height(), unscaledWidth, unscaledHeight);
 
   char buffer[2048];
   layout.print(buffer, sizeof(buffer));
-  if (!layout.validate(width, height)) {
+  if (!layout.validate(unscaledWidth, unscaledHeight)) {
     vlog.error(_("Invalid screen layout computed for resize request!"));
     vlog.error("%s", buffer);
     return;
@@ -1531,7 +1551,38 @@ void DesktopWindow::remoteResize()
 
   pendingRemoteResize = true;
   gettimeofday(&lastResize, nullptr);
-  cc->writer()->writeSetDesktopSize(width, height, layout);
+  cc->writer()->writeSetDesktopSize(unscaledWidth, unscaledHeight, layout);
+}
+
+bool DesktopWindow::isAutoFit()
+{
+  return ::scalingFactor == 0;
+}
+
+void DesktopWindow::autoFit()
+{
+  double scaleX, scaleY, scale;
+  int v_w, v_h;
+
+  if (!isAutoFit())
+    return;
+
+  scaleX = (double)w() / cc->server.width();
+  scaleY = (double)h() / cc->server.height();
+  if (scaleX <= scaleY) {
+    scale = scaleX;
+  } else {
+    scale = scaleY;
+  }
+  if (scale > 0.99 && scale < 1.01) {
+    scale = 1.0;
+  }
+  if (scale == currentScale)
+    return;
+  currentScale = scale;
+  v_w = cc->server.width()*scale;
+  v_h = cc->server.height()*scale;
+  viewport->resizeFramebuffer(v_w, v_h, scale);
 }
 
 

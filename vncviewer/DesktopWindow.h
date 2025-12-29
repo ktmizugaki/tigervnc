@@ -106,6 +106,8 @@ private:
   static void handleResizeTimeout(void *data);
   static void reconfigureFullscreen(void *data);
   void remoteResize();
+  bool isAutoFit();
+  void autoFit();
 
   void repositionWidgets();
 
@@ -142,6 +144,7 @@ private:
 
   bool pendingRemoteResize;
   struct timeval lastResize;
+  double currentScale;
 
   bool keyboardGrabbed;
   bool mouseGrabbed;

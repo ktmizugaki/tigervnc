@@ -93,8 +93,9 @@ static const int FAKE_DEL_KEY_CODE = 0x10003;
 // Used for fake key presses for lock key sync
 static const int FAKE_KEY_CODE = 0xffff;
 
-Viewport::Viewport(int w, int h, CConn* cc_)
+Viewport::Viewport(int w, int h, double scale, CConn* cc_)
   : Fl_Widget(0, 0, w, h), cc(cc_), frameBuffer(nullptr),
+    currentScale(scale),
     lastPointerPos(0, 0), lastButtonMask(0),
     keyboard(nullptr), shortcutBypass(false), shortcutActive(false),
     firstLEDState(true), pendingClientClipboard(false),
@@ -120,7 +121,7 @@ Viewport::Viewport(int w, int h, CConn* cc_)
   //        layouts we don't support
   Fl::disable_im();
 
-  frameBuffer = new PlatformPixelBuffer(w, h);
+  frameBuffer = new PlatformPixelBuffer(cc->server.width(), cc->server.height());
   assert(frameBuffer);
   cc->setFramebuffer(frameBuffer);
 
@@ -409,8 +410,11 @@ void Viewport::draw()
 }
 
 
-void Viewport::resize(int x, int y, int w, int h)
+void Viewport::resizeFramebuffer(int scaledW, int scaledH, double scale)
 {
+  int w, h;
+  w = cc->server.width();
+  h = cc->server.height();
   if ((w != frameBuffer->width()) || (h != frameBuffer->height())) {
     vlog.debug("Resizing framebuffer from %dx%d to %dx%d",
                frameBuffer->width(), frameBuffer->height(), w, h);
@@ -419,8 +423,12 @@ void Viewport::resize(int x, int y, int w, int h)
     assert(frameBuffer);
     cc->setFramebuffer(frameBuffer);
   }
+  if (scale != currentScale) {
+    vlog.debug("Changing framebuffer scale from %f to %f",
+               currentScale, scale);
+  }
 
-  Fl_Widget::resize(x, y, w, h);
+  size(scaledW, scaledH);
 }
 
 
@@ -548,12 +556,14 @@ int Viewport::handle(int event)
 void Viewport::sendPointerEvent(const core::Point& pos,
                                 uint16_t buttonMask)
 {
+  core::Point scaledPos;
   if (viewOnly)
       return;
 
+  scaledPos = core::Point(pos.x/currentScale, pos.y/currentScale);
   if ((pointerEventInterval == 0) || (buttonMask != lastButtonMask)) {
     try {
-      cc->writer()->writePointerEvent(pos, buttonMask);
+      cc->writer()->writePointerEvent(scaledPos, buttonMask);
     } catch (std::exception& e) {
       vlog.error("%s", e.what());
       abort_connection_with_unexpected_error(e);
@@ -563,7 +573,7 @@ void Viewport::sendPointerEvent(const core::Point& pos,
       Fl::add_timeout((double)pointerEventInterval/1000.0,
                       handlePointerTimeout, this);
   }
-  lastPointerPos = pos;
+  lastPointerPos = scaledPos;
   lastButtonMask = buttonMask;
 }
 

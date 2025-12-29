@@ -753,6 +753,12 @@ int main(int argc, char** argv)
   }
 #endif
 
+  /* Auto fitting and remote resize are incompatible */
+  if (remoteResize && scalingFactor == 0) {
+    /* remoteResize is true by default, so disable it istead of aborting */
+    remoteResize.setParam(false);
+  }
+
   if (listenMode) {
     std::list<network::SocketListener*> listeners;
     try {

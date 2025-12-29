@@ -184,6 +184,15 @@ core::BoolParameter
                "with all servers)",
                true);
 
+core::IntParameter
+  scalingFactor("ScalingFactor",
+                "Reduce or enlarge the remote desktop image. "
+                "The value is interpreted as a scaling factor "
+                "in percent. If the parameter is set to 0, then "
+                "remote desktop will fit to on the local screen "
+                "keeping aspect ratio.",
+                100, 0, INT_MAX);
+
 core::BoolParameter
   viewOnly("ViewOnly",
            "Don't send any mouse or keyboard events to the server",

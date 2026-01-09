@@ -56,6 +56,7 @@
 #include "parameters.h"
 #include "vncviewer.h"
 
+#include "ScalingBuffer.h"
 #include "PlatformPixelBuffer.h"
 
 #include <FL/fl_draw.H>
@@ -95,7 +96,7 @@ static const int FAKE_KEY_CODE = 0xffff;
 
 Viewport::Viewport(int w, int h, double scale, CConn* cc_)
   : Fl_Widget(0, 0, w, h), cc(cc_), frameBuffer(nullptr),
-    currentScale(scale),
+    currentScale(scale), scalingBuffer(nullptr),
     lastPointerPos(0, 0), lastButtonMask(0),
     keyboard(nullptr), shortcutBypass(false), shortcutActive(false),
     firstLEDState(true), pendingClientClipboard(false),
@@ -121,9 +122,11 @@ Viewport::Viewport(int w, int h, double scale, CConn* cc_)
   //        layouts we don't support
   Fl::disable_im();
 
-  frameBuffer = new PlatformPixelBuffer(cc->server.width(), cc->server.height());
+  frameBuffer = new PlatformPixelBuffer(w, h);
   assert(frameBuffer);
-  cc->setFramebuffer(frameBuffer);
+  scalingBuffer = new ScalingBuffer(cc->server.width(), cc->server.height(), frameBuffer);
+  assert(scalingBuffer);
+  cc->setFramebuffer(scalingBuffer);
 
   contextMenu = new Fl_Menu_Button(0, 0, 0, 0);
   // Setting box type to FL_NO_BOX prevents it from trying to draw the
@@ -413,22 +416,38 @@ void Viewport::draw()
 void Viewport::resizeFramebuffer(int scaledW, int scaledH, double scale)
 {
   int w, h;
-  w = cc->server.width();
-  h = cc->server.height();
-  if ((w != frameBuffer->width()) || (h != frameBuffer->height())) {
+  int server_w, server_h;
+  w = scaledW;
+  h = scaledH;
+  server_w = cc->server.width();
+  server_h = cc->server.height();
+  if ((server_w != scalingBuffer->width()) || (server_h != scalingBuffer->height())) {
+    vlog.debug("Resizing scalingbuffer from %dx%d to %dx%d",
+               scalingBuffer->width(), scalingBuffer->height(), server_w, server_h);
+
+    frameBuffer = new PlatformPixelBuffer(w, h);
+    assert(frameBuffer);
+    currentScale = scale;
+    scalingBuffer = new ScalingBuffer(server_w, server_h, frameBuffer);
+    assert(scalingBuffer);
+    cc->setFramebuffer(scalingBuffer);
+  } else if ((w != frameBuffer->width()) || (h != frameBuffer->height())) {
     vlog.debug("Resizing framebuffer from %dx%d to %dx%d",
                frameBuffer->width(), frameBuffer->height(), w, h);
 
     frameBuffer = new PlatformPixelBuffer(w, h);
     assert(frameBuffer);
-    cc->setFramebuffer(frameBuffer);
+    currentScale = scale;
+    scalingBuffer->setFramebuffer(frameBuffer);
   }
   if (scale != currentScale) {
     vlog.debug("Changing framebuffer scale from %f to %f",
                currentScale, scale);
+    currentScale = scale;
   }
 
   size(scaledW, scaledH);
+  updateWindow();
 }
 
 

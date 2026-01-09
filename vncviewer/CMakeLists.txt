@@ -20,6 +20,7 @@ add_executable(vncviewer
   Surface.cxx
   OptionsDialog.cxx
   PlatformPixelBuffer.cxx
+  ScalingBuffer.cxx
   Viewport.cxx
   parameters.cxx
   touch.cxx

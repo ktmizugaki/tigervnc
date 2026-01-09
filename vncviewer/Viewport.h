@@ -33,6 +33,7 @@ class Fl_RGB_Image;
 
 class CConn;
 class Keyboard;
+class ScalingBuffer;
 class PlatformPixelBuffer;
 class Surface;
 
@@ -110,6 +111,7 @@ private:
 
   PlatformPixelBuffer* frameBuffer;
   double currentScale;
+  ScalingBuffer* scalingBuffer;
 
   core::Point lastPointerPos;
   uint16_t lastButtonMask;

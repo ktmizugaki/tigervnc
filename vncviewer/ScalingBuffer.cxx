@@ -117,6 +117,7 @@ ScalingBuffer::ScalingBuffer(int width, int height, rfb::ModifiablePixelBuffer* 
   ManagedPixelBuffer(fb->getPF(), width, height),
   framebuffer(fb)
 {
+  bypassScaling = fb->width() == width && fb->height() == height;
   scaler = new NNScaler();
   scaler->prepare(fb, this);
 }
@@ -129,25 +130,78 @@ ScalingBuffer::~ScalingBuffer()
 
 void ScalingBuffer::setScaler(PixelBufferScaler *scaler_)
 {
-  assert(scaler != nullptr);
+  assert(scaler_ != nullptr);
   delete scaler;
   scaler = scaler_;
   scaler->prepare(framebuffer, this);
-  commitBufferRW(getRect());
+  if (!bypassScaling) {
+    commitBufferRW(getRect());
+  }
+}
+
+static void copyBuffer(rfb::ModifiablePixelBuffer* dst, const rfb::PixelBuffer* src)
+{
+  core::Rect r;
+  const uint8_t *data;
+  int stride;
+  assert(dst->width() == src->width() && dst->height() == src->height());
+  r = src->getRect();
+  data = src->getBuffer(r, &stride);
+  dst->imageRect(r, data, stride);
 }
 
 void ScalingBuffer::setFramebuffer(rfb::ModifiablePixelBuffer* fb)
 {
   assert(fb != nullptr);
   assert(fb->getPF() == getPF());
-  delete framebuffer;
+  rfb::ModifiablePixelBuffer* oldFb = framebuffer;
+  bool wasBypassScaling = bypassScaling;
+  bool willBypassScaling = fb->width() == width() && fb->height() == height();
   framebuffer = fb;
+  bypassScaling = willBypassScaling;
   scaler->prepare(fb, this);
-  commitBufferRW(getRect());
+  if (wasBypassScaling) {
+      /* If bypassScaling was enabled, ScalingBuffer does not hold
+       * screan image. So need to copy image from old buffer.
+       * commitBufferRW will be called from imageRect. */
+      copyBuffer(this, oldFb);
+  } else {
+      if (willBypassScaling) {
+          /* If bypassScaling is true, ScalingBuffer returns fb data.
+           * Thus disable bypassScaling while copying. */
+          bypassScaling = false;
+          copyBuffer(fb, this);
+          bypassScaling = true;
+      } else {
+          commitBufferRW(getRect());
+      }
+  }
+  delete oldFb;
+}
+
+const uint8_t* ScalingBuffer::getBuffer(const core::Rect& r, int* stride_) const
+{
+  /* needed for CConnection::setFramebuffer */
+  if (bypassScaling) {
+    return framebuffer->getBuffer(r, stride_);
+  }
+  return FullFramePixelBuffer::getBuffer(r, stride_);
+}
+
+uint8_t* ScalingBuffer::getBufferRW(const core::Rect& r, int* stride_)
+{
+  if (bypassScaling) {
+    return framebuffer->getBufferRW(r, stride_);
+  }
+  return FullFramePixelBuffer::getBufferRW(r, stride_);
 }
 
 void ScalingBuffer::commitBufferRW(const core::Rect& r)
 {
+  if (bypassScaling) {
+    framebuffer->commitBufferRW(r);
+    return;
+  }
   FullFramePixelBuffer::commitBufferRW(r);
   core::Rect r2 = scaler->calculateAffectedRect(r);
   if (!r2.is_empty()) {

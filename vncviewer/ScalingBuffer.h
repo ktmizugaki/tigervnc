@@ -38,11 +38,17 @@ public:
 
   void setScaler(PixelBufferScaler *scaler);
   void setFramebuffer(rfb::ModifiablePixelBuffer* fb);
+  const uint8_t* getBuffer(const core::Rect& r,
+                           int* stride) const override;
+  uint8_t* getBufferRW(const core::Rect& r, int* stride) override;
   void commitBufferRW(const core::Rect& r) override;
 
 protected:
   rfb::ModifiablePixelBuffer* framebuffer;
   PixelBufferScaler *scaler;
+
+private:
+  bool bypassScaling;
 };
 
 #endif
